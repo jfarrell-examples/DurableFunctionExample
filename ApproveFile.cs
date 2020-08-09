@@ -37,15 +37,18 @@ namespace Farrellsoft.Example.FileApproval
         {
             var input = context.GetInput<ApprovalWorkflowData>();
 
-            Task<bool> uploadApprovedEvent = context.WaitForExternalEvent<bool>("UploadApproved");
+            var uploadApprovedEvent = context.WaitForExternalEvent<bool>("UploadApproved");
             await Task.WhenAny(uploadApprovedEvent);
 
             // run through OCR tools
-            var ocrProcessOutcomeResult = await context.CallActivityAsync<bool>(nameof(ProcessFileFunction.ProcessFile), input.TargetId);
+            var ocrProcessTask = context.CallActivityAsync<bool>(nameof(ProcessFileFunction.ProcessFile), input.TargetId);
+            await Task.WhenAny(ocrProcessTask);
 
             // ask for approval to download
-            
-            log.LogInformation("File Processed");
+            var downloadApprovedEvent = context.WaitForExternalEvent<bool>("DownloadApproved");
+            await Task.WhenAny(downloadApprovedEvent);
+
+            log.LogInformation("File Ready");
         }
     }
 }

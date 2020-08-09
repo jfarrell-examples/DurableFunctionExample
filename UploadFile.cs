@@ -31,7 +31,6 @@ namespace Farrellsoft.Example.FileApproval
             {
                 RowKey = fileName,
                 PartitionKey = fileName,
-                FileSize = uploadFile.ContentLength?.ToString()
             });
             await metadataTable.ExecuteAsync(addOperation);
 
