@@ -17,7 +17,7 @@ namespace Farrellsoft.Example.FileApproval
         public static async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "file/add")] HttpRequest uploadFile,
             [Blob("files", FileAccess.Write, Connection = "StorageAccountConnectionString")] CloudBlobContainer blobContainer,
-            [Table("metadata", Connection = "TableConnectionString")] IAsyncCollector<FileMetaStart> metadataCollection,
+            [Table("metadata", Connection = "TableConnectionString")] CloudTable metadataTable,
             ILogger log)
         {
             var fileName = Guid.NewGuid().ToString();
@@ -26,7 +26,14 @@ namespace Farrellsoft.Example.FileApproval
             var cloudBlockBlob = blobContainer.GetBlockBlobReference(fileName);
             await cloudBlockBlob.UploadFromStreamAsync(uploadFile.Body);
 
-            await metadataCollection.AddAsync(new FileMetaStart { RowKey = fileName, PartitionKey = fileName, FileSize = uploadFile.ContentLength?.ToString() });
+            await metadataTable.CreateIfNotExistsAsync();
+            var addOperation = TableOperation.Insert(new FileMetadata
+            {
+                RowKey = fileName,
+                PartitionKey = fileName,
+                FileSize = uploadFile.ContentLength?.ToString()
+            });
+            await metadataTable.ExecuteAsync(addOperation);
 
             return new CreatedResult(string.Empty, fileName);
         }

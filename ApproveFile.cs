@@ -1,52 +1,51 @@
-using System.Collections.Generic;
 using System.IO;
-using System.Net.Http;
 using System.Threading.Tasks;
+using Microsoft.Azure.Cosmos.Table;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.DurableTask;
-using Microsoft.Azure.WebJobs.Extensions.Http;
-using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Extensions.Logging;
 
 namespace Farrellsoft.Example.FileApproval
 {
     public static class ApproveFile
     {
-        [FunctionName("ApproveFile")]
-        public static async Task<List<string>> RunOrchestrator(
-            [OrchestrationTrigger] IDurableOrchestrationContext context)
-        {
-            var outputs = new List<string>();
-
-            // Replace "hello" with the name of your Durable Activity Function.
-            outputs.Add(await context.CallActivityAsync<string>("ApproveFile_Hello", "Tokyo"));
-            outputs.Add(await context.CallActivityAsync<string>("ApproveFile_Hello", "Seattle"));
-            outputs.Add(await context.CallActivityAsync<string>("ApproveFile_Hello", "London"));
-
-            // returns ["Hello Tokyo!", "Hello Seattle!", "Hello London!"]
-            return outputs;
-        }
-
-        [FunctionName("ApproveFile_Hello")]
-        public static string SayHello([ActivityTrigger] string name, ILogger log)
-        {
-            log.LogInformation($"Saying hello to {name}.");
-            return $"Hello {name}!";
-        }
-
         [FunctionName("ApproveFile_Start")]
         public static async Task HttpStart(
             [BlobTrigger("files/{id}", Connection = "StorageAccountConnectionString")] Stream fileBlob,
             string id,
-            [Table("metadata", "Http", "{id}", Connection = "TableConnectionString")] FileMetaStart metadata,
+            [Table("metadata", "{id}", "{id}", Connection = "TableConnectionString")] FileMetadata metadata,
+            [Table("metadata", Connection = "TableConnectionString")] CloudTable metadataTable,
             [DurableClient] IDurableOrchestrationClient starter,
             ILogger log)
         {
             // Function input comes from the request content.
-            /*(string instanceId = await starter.StartNewAsync("ApproveFile", null);
+            string instanceId = await starter.StartNewAsync("ProcessFileFlow", new ApprovalWorkflowData { TargetId = id });
+            metadata.WorkflowId = instanceId;
 
-            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");*/
+            var replaceOperation = TableOperation.Replace(metadata);
+            var result = await metadataTable.ExecuteAsync(replaceOperation);
+
+            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
             log.LogInformation("Flow started");
+        }
+
+        [FunctionName("ProcessFileFlow")]
+        public static async Task RunOrchestrator(
+            [OrchestrationTrigger] IDurableOrchestrationContext context,
+            [Table("metadata", Connection = "TableConnectionString")] CloudTable metadataTable,
+            ILogger log)
+        {
+            var input = context.GetInput<ApprovalWorkflowData>();
+
+            Task<bool> uploadApprovedEvent = context.WaitForExternalEvent<bool>("UploadApproved");
+            await Task.WhenAny(uploadApprovedEvent);
+
+            // run through OCR tools
+            var ocrProcessOutcomeResult = await context.CallActivityAsync<bool>(nameof(ProcessFileFunction.ProcessFile), input.TargetId);
+
+            // ask for approval to download
+            
+            log.LogInformation("File Processed");
         }
     }
 }
